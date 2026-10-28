@@ -69,17 +69,38 @@ def api(method: str, **params):
 
 
 def split_message(text: str, limit: int = 3800) -> list[str]:
-    """Telegram caps messages at 4096 chars; split on line boundaries so HTML stays valid."""
+    """Telegram caps messages at 4096 chars.
+
+    A match card is a <blockquote> spanning several lines, so split between
+    cards, never inside one - otherwise the HTML is unbalanced.
+    """
     if len(text) <= limit:
         return [text]
+
+    atoms: list[str] = []
+    buffer: list[str] = []
+    inside = False
+    for line in text.split("\n"):
+        if line.startswith("<blockquote>"):
+            inside = True
+        buffer.append(line)
+        if inside and line.endswith("</blockquote>"):
+            inside = False
+        if not inside:
+            atoms.append("\n".join(buffer))
+            buffer = []
+    if buffer:
+        atoms.append("\n".join(buffer))
+
     chunks: list[str] = []
     current = ""
-    for line in text.split("\n"):
-        if current and len(current) + len(line) + 1 > limit:
+    for atom in atoms:
+        candidate = f"{current}\n{atom}" if current else atom
+        if current and len(candidate) > limit:
             chunks.append(current)
-            current = line
+            current = atom
         else:
-            current = f"{current}\n{line}" if current else line
+            current = candidate
     if current:
         chunks.append(current)
     return chunks
@@ -92,6 +113,20 @@ def send(chat_id: int, text: str) -> None:
 
 
 # ------------------------------------------------------------------ predictions
+def _form(train: pd.DataFrame, team: str, n: int = 5) -> str:
+    """Last n results, newest first: ✅ win, ➖ draw, ❌ loss."""
+    games = train[(train["home"] == team) | (train["away"] == team)].sort_values("date").tail(n)
+    marks = []
+    for _, g in games.iterrows():
+        if g["ftr"] == "D":
+            marks.append("➖")
+        elif (g["ftr"] == "H") == (g["home"] == team):
+            marks.append("✅")
+        else:
+            marks.append("❌")
+    return "".join(reversed(marks)) or "—"
+
+
 def market_rows(fx: pd.DataFrame) -> pd.DataFrame:
     """Fit one model per league and predict every fixture in it."""
     if fx.empty:
@@ -109,6 +144,7 @@ def market_rows(fx: pd.DataFrame) -> pd.DataFrame:
             model.set_adjustment(team, spec.get("kind", "attack"), float(spec.get("factor", 1.0)))
 
         counts = pd.concat([train["home"], train["away"]]).value_counts()
+        forms = {t: _form(train, t) for t in set(group["home"]) | set(group["away"])}
         for _, r in group.iterrows():
             row = PF.build_row(r.to_dict(), model.predict(r["home"], r["away"]))
             n_min = min(int(counts.get(r["home"], 0)), int(counts.get(r["away"], 0)))
@@ -118,6 +154,8 @@ def market_rows(fx: pd.DataFrame) -> pd.DataFrame:
             row["final_away"] = w * row["p_away"] + (1 - w) * row["mkt_away"]
             row["low_data"] = n_min < 15
             row["time"] = r.get("time", "")
+            row["form_home"] = forms.get(r["home"], "—")
+            row["form_away"] = forms.get(r["away"], "—")
             out.append(row)
     if not out:
         return pd.DataFrame()
@@ -174,6 +212,11 @@ def pick_text(r) -> str:
     return f"{text} {pc(chance)}"
 
 
+def odd(r, key: str) -> str:
+    value = r.get(key)
+    return "—" if value is None or pd.isna(value) else f"{value:.2f}"
+
+
 def format_day(rows: pd.DataFrame, title: str) -> str:
     if rows.empty:
         return f"{title}\n\nبرنامه‌ای برای این بازه در لیگ‌های پوشش‌داده‌شده پیدا نشد."
@@ -181,24 +224,25 @@ def format_day(rows: pd.DataFrame, title: str) -> str:
     parts = [
         f"<b>{title}</b>",
         f"{len(rows)} بازی · همهٔ ساعت‌ها به وقت تهران 🕒",
-        "تیم اول میزبان است، تیم دوم مهمان · ➜ = تیمی که شانس بردش بیشتر است",
-        "ضریب‌ها به ترتیب: میزبان / مساوی / مهمان",
+        "🏠 میزبان · ✈️ مهمان · ➜ محتمل‌ترین نتیجه",
     ]
-    for league, g in rows.groupby("league"):
-        flag = LEAGUE_FLAG.get(league, "⚽️")
-        parts.append(f"\n{flag} <b>{html.escape(league)}</b>")
-        for _, r in g.iterrows():
-            home = html.escape(str(r["home"]))
-            away = html.escape(str(r["away"]))
-            warn = " ⚠" if r.get("low_data") else ""
-            goals = r.get("exp_goals")
-            goals_text = "—" if goals is None or pd.isna(goals) else f"{goals:.1f}"
-            parts.append(
-                f"🕒 {r['time'] or '--:--'}  <b>{home}</b> – <b>{away}</b>{warn}  "
-                f"➜ {html.escape(pick_text(r))}\n"
-                f"   {home} {pc(r['final_home'])} · مساوی {pc(r['final_draw'])} · "
-                f"{away} {pc(r['final_away'])} · ضریب {odds_text(r)} · ⚽ {goals_text}"
-            )
+    for _, r in rows.iterrows():
+        home = html.escape(str(r["home"]))
+        away = html.escape(str(r["away"]))
+        league = html.escape(str(r["league"]))
+        flag = LEAGUE_FLAG.get(str(r["league"]), "⚽️")
+        warn = " ⚠" if r.get("low_data") else ""
+        goals = r.get("exp_goals")
+        goals_text = "—" if goals is None or pd.isna(goals) else f"{goals:.1f}"
+        parts.append(
+            "<blockquote>"
+            f"🕒 <b>{r['time'] or '--:--'}</b> · {flag} {league}{warn}\n"
+            f"🏠 <b>{home}</b> — برد {pc(r['final_home'])} · ضریب {odd(r, 'odds_h')}\n"
+            f"✈️ <b>{away}</b> — برد {pc(r['final_away'])} · ضریب {odd(r, 'odds_a')}\n"
+            f"📈 فرم {home}: {r.get('form_home', '—')} · {away}: {r.get('form_away', '—')}\n"
+            f"➜ <b>{html.escape(pick_text(r))}</b> · مساوی {pc(r['final_draw'])} · ⚽ {goals_text}"
+            "</blockquote>"
+        )
     parts.append("\n⚠ = سابقهٔ کم (کمتر از ۱۵ بازی)، خروجی به سمت قیمت بازار متمایل شده")
     return "\n".join(parts)
 
