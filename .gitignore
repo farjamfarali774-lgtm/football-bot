@@ -1,0 +1,21 @@
+# Secrets — never commit the real .env
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# scratch outputs from local runs
+backtest_all.txt
+backtest_out.txt
+backtest_pooled.txt
+fixtures_out.txt
+bot_test.txt
+SUMMARY.txt
+summary.html
+
+# OS noise
+.DS_Store
+Thumbs.db

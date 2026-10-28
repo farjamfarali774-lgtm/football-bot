@@ -1,0 +1,76 @@
+name: telegram-bot
+
+# Answers /today, /tomorrow, /live, /match.
+#
+# Cadence: a scheduled run wakes up, listens for ~4.5 minutes, then exits.
+# With "*/5" the bot is covered almost continuously.
+#
+# Cost: GitHub gives 2,000 free minutes/month to PRIVATE repos; this schedule
+# uses roughly 1,200 minutes/DAY. So either make this repo public (Actions are
+# then unlimited and the code contains no secrets), or slow it down:
+#     */15 cron + "python bot.py --listen 280"  -> answers within ~15 min
+#     */30 cron + "python bot.py --listen 280"  -> answers within ~30 min
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: telegram-bot
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: install dependencies
+        run: pip install -r requirements.txt
+
+      - name: check secrets
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        run: |
+          if [ -z "$TELEGRAM_TOKEN" ]; then
+            echo "::error::TELEGRAM_TOKEN secret is missing (Settings -> Secrets and variables -> Actions)"
+            exit 1
+          fi
+
+      - name: listen for messages
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          ALLOWED_USER_IDS: ${{ secrets.ALLOWED_USER_IDS }}
+          PYTHONUNBUFFERED: "1"
+        run: python bot.py --listen 280
+
+      - name: save update offset
+        if: always()
+        run: |
+          if [ -z "$(git status --porcelain .state)" ]; then
+            echo "offset unchanged"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .state
+          git commit -m "bot: update offset"
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash origin "$GITHUB_REF_NAME"
+            if git push origin "HEAD:$GITHUB_REF_NAME"; then
+              echo "pushed"
+              break
+            fi
+            sleep 5
+          done

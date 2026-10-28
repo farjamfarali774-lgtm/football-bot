@@ -1,0 +1,5 @@
+# Normalise line endings for code, never touch the downloaded data files.
+* text=auto eol=lf
+*.csv -text
+*.py text eol=lf
+*.yml text eol=lf

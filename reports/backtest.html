@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<title>گزارش بک‌تست مدل پیش‌بینی فوتبال</title>
+<style>
+  :root { --bg:#0e1117; --card:#161b22; --line:#272e37; --fg:#e6edf3; --muted:#8b949e;
+           --good:#3fb950; --bad:#f85149; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:32px 20px 80px; background:var(--bg); color:var(--fg);
+          font-family:"Segoe UI",Tahoma,system-ui,sans-serif; line-height:1.7; }
+  .wrap { max-width:1000px; margin:0 auto; }
+  h1 { font-size:24px; margin:0 0 4px; }
+  h2 { font-size:17px; margin:36px 0 10px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:24px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .card .k { color:var(--muted); font-size:12px; }
+  .card .v { font-size:22px; font-weight:600; margin-top:2px; }
+  .verdict { margin:20px 0; padding:16px 18px; border-radius:10px; border:1px solid var(--line);
+              background:var(--card); }
+  .verdict.good { border-color:#238636; }
+  .verdict.bad { border-color:#8b2c2c; }
+  table.tbl { width:100%; border-collapse:collapse; font-size:13px; background:var(--card);
+               border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  table.tbl th { background:#1c2430; color:var(--muted); font-weight:600; text-align:right;
+                  padding:9px 12px; font-size:12px; }
+  table.tbl td { padding:8px 12px; border-top:1px solid var(--line); }
+  .good { color:var(--good); } .bad { color:var(--bad); }
+  .note { color:var(--muted); font-size:12.5px; margin-top:8px; }
+  code { background:#1c2430; padding:1px 5px; border-radius:4px; font-size:12px; }
+</style></head><body><div class="wrap">
+<h1>گزارش بک‌تست: مدل پیش‌بینی فوتبال</h1>
+<div class="sub">25,107 بازی · 22 لیگ · 2324, 2425, 2526, 2627</div>
+
+<div class="cards">
+  <div class="card"><div class="k">دقت مدل</div><div class="v">48.6%</div></div>
+  <div class="card"><div class="k">دقت بازار</div><div class="v">51.1%</div></div>
+  <div class="card"><div class="k">LogLoss مدل</div><div class="v">1.022</div></div>
+  <div class="card"><div class="k">LogLoss بازار</div><div class="v">0.996</div></div>
+  <div class="card"><div class="k">Brier مدل</div><div class="v">0.613</div></div>
+  <div class="card"><div class="k">Brier بازار</div><div class="v">0.595</div></div>
+</div>
+
+<div class="verdict bad">مدل از بازار بهتر نیست. یعنی هر شرطی که بر اساس این مدل ببندی، در بلندمدت انتظار ضرر داری — دقیقاً همان چیزی که باید قبل از خرج کردن پول می‌فهمیدیم.</div>
+
+<h2>مدل در مقابل بازار، به تفکیک لیگ</h2>
+<table class="dataframe tbl">
+  <thead>
+    <tr style="text-align: right;">
+      <th>لیگ</th>
+      <th>بازی</th>
+      <th>دقت مدل</th>
+      <th>دقت بازار</th>
+      <th>LogLoss مدل</th>
+      <th>LogLoss بازار</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>2. Bundesliga</td>
+      <td>999</td>
+      <td>45.7%</td>
+      <td>47.9%</td>
+      <td>1.057</td>
+      <td>1.041</td>
+    </tr>
+    <tr>
+      <td>Belgian Pro League</td>
+      <td>1015</td>
+      <td>50.7%</td>
+      <td>51.8%</td>
+      <td>1.009</td>
+      <td>0.986</td>
+    </tr>
+    <tr>
+      <td>Bundesliga</td>
+      <td>981</td>
+      <td>52.2%</td>
+      <td>55.0%</td>
+      <td>0.993</td>
+      <td>0.963</td>
+    </tr>
+    <tr>
+      <td>Championship</td>
+      <td>1800</td>
+      <td>44.6%</td>
+      <td>47.7%</td>
+      <td>1.055</td>
+      <td>1.027</td>
+    </tr>
+    <tr>
+      <td>Eredivisie</td>
+      <td>1008</td>
+      <td>53.0%</td>
+      <td>55.3%</td>
+      <td>0.970</td>
+      <td>0.943</td>
+    </tr>
+    <tr>
+      <td>Greek Super League</td>
+      <td>764</td>
+      <td>53.1%</td>
+      <td>54.7%</td>
+      <td>0.957</td>
+      <td>0.928</td>
+    </tr>
+    <tr>
+      <td>La Liga</td>
+      <td>1239</td>
+      <td>53.6%</td>
+      <td>55.5%</td>
+      <td>0.979</td>
+      <td>0.951</td>
+    </tr>
+    <tr>
+      <td>League One</td>
+      <td>1794</td>
+      <td>48.6%</td>
+      <td>49.6%</td>
+      <td>1.042</td>
+      <td>1.019</td>
+    </tr>
+    <tr>
+      <td>League Two</td>
+      <td>1806</td>
+      <td>45.4%</td>
+      <td>47.5%</td>
+      <td>1.063</td>
+      <td>1.043</td>
+    </tr>
+    <tr>
+      <td>Ligue 1</td>
+      <td>990</td>
+      <td>51.5%</td>
+      <td>53.4%</td>
+      <td>1.003</td>
+      <td>0.982</td>
+    </tr>
+    <tr>
+      <td>Ligue 2</td>
+      <td>1080</td>
+      <td>43.6%</td>
+      <td>45.6%</td>
+      <td>1.073</td>
+      <td>1.046</td>
+    </tr>
+    <tr>
+      <td>National League</td>
+      <td>1821</td>
+      <td>47.4%</td>
+      <td>49.3%</td>
+      <td>1.035</td>
+      <td>1.018</td>
+    </tr>
+    <tr>
+      <td>Premier League</td>
+      <td>1220</td>
+      <td>50.1%</td>
+      <td>54.1%</td>
+      <td>1.000</td>
+      <td>0.964</td>
+    </tr>
+    <tr>
+      <td>Primeira Liga</td>
+      <td>999</td>
+      <td>55.0%</td>
+      <td>56.3%</td>
+      <td>0.937</td>
+      <td>0.914</td>
+    </tr>
+    <tr>
+      <td>Scottish Championship</td>
+      <td>598</td>
+      <td>45.5%</td>
+      <td>48.3%</td>
+      <td>1.056</td>
+      <td>1.021</td>
+    </tr>
+    <tr>
+      <td>Scottish League One</td>
+      <td>598</td>
+      <td>46.7%</td>
+      <td>52.5%</td>
+      <td>1.038</td>
+      <td>0.996</td>
+    </tr>
+    <tr>
+      <td>Scottish League Two</td>
+      <td>595</td>
+      <td>42.9%</td>
+      <td>45.4%</td>
+      <td>1.069</td>
+      <td>1.057</td>
+    </tr>
+    <tr>
+      <td>Scottish Premiership</td>
+      <td>744</td>
+      <td>53.1%</td>
+      <td>53.1%</td>
+      <td>0.972</td>
+      <td>0.954</td>
+    </tr>
+    <tr>
+      <td>Segunda Division</td>
+      <td>1507</td>
+      <td>46.2%</td>
+      <td>48.7%</td>
+      <td>1.052</td>
+      <td>1.026</td>
+    </tr>
+    <tr>
+      <td>Serie A</td>
+      <td>1220</td>
+      <td>53.2%</td>
+      <td>55.2%</td>
+      <td>0.985</td>
+      <td>0.960</td>
+    </tr>
+    <tr>
+      <td>Serie B</td>
+      <td>1220</td>
+      <td>41.7%</td>
+      <td>45.7%</td>
+      <td>1.073</td>
+      <td>1.038</td>
+    </tr>
+    <tr>
+      <td>Super Lig</td>
+      <td>1109</td>
+      <td>51.6%</td>
+      <td>57.2%</td>
+      <td>0.983</td>
+      <td>0.939</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>به تفکیک فصل</h2>
+<table class="dataframe tbl">
+  <thead>
+    <tr style="text-align: right;">
+      <th>فصل</th>
+      <th>بازی</th>
+      <th>دقت مدل</th>
+      <th>دقت بازار</th>
+      <th>LogLoss مدل</th>
+      <th>LogLoss بازار</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>2324</td>
+      <td>7799</td>
+      <td>49.0%</td>
+      <td>51.3%</td>
+      <td>1.017</td>
+      <td>0.991</td>
+    </tr>
+    <tr>
+      <td>2425</td>
+      <td>7681</td>
+      <td>48.5%</td>
+      <td>51.0%</td>
+      <td>1.024</td>
+      <td>0.997</td>
+    </tr>
+    <tr>
+      <td>2526</td>
+      <td>7646</td>
+      <td>48.4%</td>
+      <td>50.8%</td>
+      <td>1.023</td>
+      <td>1.000</td>
+    </tr>
+    <tr>
+      <td>2627</td>
+      <td>1981</td>
+      <td>48.6%</td>
+      <td>51.4%</td>
+      <td>1.025</td>
+      <td>0.993</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>اگر با این مدل شرط می‌بستیم</h2>
+<table class="tbl"><thead><tr>
+<th>آستانهٔ مزیت</th><th>تعداد شرط</th><th>مجموع مبلغ</th><th>سود/زیان</th><th>بازده</th>
+</tr></thead><tbody><tr><td>0%</td><td>28430</td><td>28430</td><td>-3041.2</td><td class='bad'>-10.7%</td></tr><tr><td>2%</td><td>25297</td><td>25297</td><td>-2728.1</td><td class='bad'>-10.8%</td></tr><tr><td>5%</td><td>21442</td><td>21442</td><td>-2368.8</td><td class='bad'>-11.0%</td></tr><tr><td>10%</td><td>16367</td><td>16367</td><td>-1992.9</td><td class='bad'>-12.2%</td></tr></tbody></table>
+<div class="note">هر شرط ۱ واحد، با ضریب بسته‌شدن بازار. آستانهٔ مزیت یعنی مدل چقدر باید از قیمت بازار خوش‌بین‌تر باشد تا وارد شویم.</div>
+
+<h2>کالیبراسیون: وقتی مدل ۴۰٪ می‌گوید، واقعاً چند درصد اتفاق افتاده؟</h2>
+<table class="tbl"><thead><tr>
+<th>بازهٔ احتمال</th><th>تعداد</th><th>میانگین پیش‌بینی</th><th>واقعیت</th><th>خطا</th>
+</tr></thead><tbody><tr><td>0%-10%</td><td>1190</td><td>7.3%</td><td>7.1%</td><td class='good'>-0.1</td></tr><tr><td>10%-20%</td><td>7177</td><td>16.2%</td><td>16.2%</td><td class='good'>-0.0</td></tr><tr><td>20%-30%</td><td>31005</td><td>25.6%</td><td>26.5%</td><td class='good'>+0.9</td></tr><tr><td>30%-40%</td><td>15990</td><td>34.3%</td><td>33.5%</td><td class='good'>-0.8</td></tr><tr><td>40%-50%</td><td>10316</td><td>44.6%</td><td>43.6%</td><td class='good'>-1.1</td></tr><tr><td>50%-60%</td><td>5702</td><td>54.4%</td><td>53.4%</td><td class='good'>-1.0</td></tr><tr><td>60%-70%</td><td>2508</td><td>64.4%</td><td>65.2%</td><td class='good'>+0.8</td></tr><tr><td>70%-80%</td><td>1058</td><td>74.2%</td><td>75.3%</td><td class='good'>+1.1</td></tr><tr><td>80%-90%</td><td>343</td><td>83.7%</td><td>81.6%</td><td class='good'>-2.1</td></tr><tr><td>90%-100%</td><td>32</td><td>91.8%</td><td>84.4%</td><td class='bad'>-7.5</td></tr></tbody></table>
+<div class="note">خطای کمتر از ۳ درصد یعنی مدل کم‌وبیش صادق است.</div>
+
+<h2>این اعداد چه معنایی دارند</h2>
+<div class="note">
+<b>دقت</b> فقط می‌گوید چند بار تیم برنده را درست حدس زده؛ برای پول بی‌معنی است، چون همه می‌توانند همیشه روی میزبان شرط ببندند و ۴۵٪ دقت بگیرند.<br>
+<b>LogLoss</b> معیار اصلی است: کیفیت خودِ احتمال‌ها، نه فقط حدس نهایی. هرچه کمتر بهتر. پایین‌تر بودن LogLoss بازار از مدل یعنی بازار بهتر می‌داند.<br>
+<b>بازده</b> تنها چیزی است که به جیب مربوط است، و برای معنادار شدن به هزاران شرط نیاز دارد.
+</div>
+</div></body></html>
