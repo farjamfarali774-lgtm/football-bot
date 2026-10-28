@@ -1,5 +1,6 @@
 # Secrets — never commit the real .env
 .env
+token.txt
 
 # Python
 __pycache__/
