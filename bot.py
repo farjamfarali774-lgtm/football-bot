@@ -116,7 +116,7 @@ def market_rows(fx: pd.DataFrame) -> pd.DataFrame:
             row["final_home"] = w * row["p_home"] + (1 - w) * row["mkt_home"]
             row["final_draw"] = w * row["p_draw"] + (1 - w) * row["mkt_draw"]
             row["final_away"] = w * row["p_away"] + (1 - w) * row["mkt_away"]
-            row["low_data"] = n_min < 30
+            row["low_data"] = n_min < 15
             row["time"] = r.get("time", "")
             out.append(row)
     if not out:
@@ -142,7 +142,7 @@ def format_day(rows: pd.DataFrame, title: str) -> str:
                 f"<code>{r['time'] or '--:--'}</code>  <b>{home}</b> - <b>{away}</b>{flag}\n"
                 f"      میزبان {pc(r['final_home'])} · مساوی {pc(r['final_draw'])} · مهمان {pc(r['final_away'])}"
             )
-    parts.append("\n⚠ = سابقهٔ کم، خروجی به سمت قیمت بازار متمایل شده")
+    parts.append("\n⚠ = سابقهٔ کم (کمتر از ۱۵ بازی)، خروجی به سمت قیمت بازار متمایل شده")
     return "\n".join(parts)
 
 
