@@ -128,19 +128,76 @@ def pc(x: float) -> str:
     return "—" if pd.isna(x) else f"{x * 100:.0f}%"
 
 
+LEAGUE_FLAG = {
+    "Premier League": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "Championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "League One": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "League Two": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "National League": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "Scottish Premiership": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+    "Scottish Championship": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+    "Scottish League One": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+    "Scottish League Two": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+    "Bundesliga": "🇩🇪",
+    "2. Bundesliga": "🇩🇪",
+    "Serie A": "🇮🇹",
+    "Serie B": "🇮🇹",
+    "La Liga": "🇪🇸",
+    "Segunda Division": "🇪🇸",
+    "Ligue 1": "🇫🇷",
+    "Ligue 2": "🇫🇷",
+    "Eredivisie": "🇳🇱",
+    "Belgian Pro League": "🇧🇪",
+    "Primeira Liga": "🇵🇹",
+    "Super Lig": "🇹🇷",
+    "Greek Super League": "🇬🇷",
+}
+
+
+def odds_text(r) -> str:
+    parts = []
+    for key in ("odds_h", "odds_d", "odds_a"):
+        value = r.get(key)
+        parts.append("—" if pd.isna(value) else f"{value:.2f}")
+    return "/".join(parts)
+
+
+def pick_text(r) -> str:
+    """Plain-language answer to 'who wins?'."""
+    options = {
+        "home": (r["final_home"], f"برد {r['home']}"),
+        "draw": (r["final_draw"], "مساوی"),
+        "away": (r["final_away"], f"برد {r['away']}"),
+    }
+    best = max(options, key=lambda k: options[k][0])
+    chance, text = options[best]
+    return f"{text} {pc(chance)}"
+
+
 def format_day(rows: pd.DataFrame, title: str) -> str:
     if rows.empty:
         return f"{title}\n\nبرنامه‌ای برای این بازه در لیگ‌های پوشش‌داده‌شده پیدا نشد."
-    parts = [f"<b>{title}</b>"]
+
+    parts = [
+        f"<b>{title}</b>",
+        f"{len(rows)} بازی · همهٔ ساعت‌ها به وقت تهران 🕒",
+        "تیم اول میزبان است، تیم دوم مهمان · ➜ = تیمی که شانس بردش بیشتر است",
+        "ضریب‌ها به ترتیب: میزبان / مساوی / مهمان",
+    ]
     for league, g in rows.groupby("league"):
-        parts.append(f"\n<b>{league}</b>")
+        flag = LEAGUE_FLAG.get(league, "⚽️")
+        parts.append(f"\n{flag} <b>{html.escape(league)}</b>")
         for _, r in g.iterrows():
             home = html.escape(str(r["home"]))
             away = html.escape(str(r["away"]))
-            flag = " ⚠" if r.get("low_data") else ""
+            warn = " ⚠" if r.get("low_data") else ""
+            goals = r.get("exp_goals")
+            goals_text = "—" if goals is None or pd.isna(goals) else f"{goals:.1f}"
             parts.append(
-                f"<code>{r['time'] or '--:--'}</code>  <b>{home}</b> - <b>{away}</b>{flag}\n"
-                f"      میزبان {pc(r['final_home'])} · مساوی {pc(r['final_draw'])} · مهمان {pc(r['final_away'])}"
+                f"🕒 {r['time'] or '--:--'}  <b>{home}</b> – <b>{away}</b>{warn}  "
+                f"➜ {html.escape(pick_text(r))}\n"
+                f"   {home} {pc(r['final_home'])} · مساوی {pc(r['final_draw'])} · "
+                f"{away} {pc(r['final_away'])} · ضریب {odds_text(r)} · ⚽ {goals_text}"
             )
     parts.append("\n⚠ = سابقهٔ کم (کمتر از ۱۵ بازی)، خروجی به سمت قیمت بازار متمایل شده")
     return "\n".join(parts)
@@ -227,8 +284,10 @@ HELP = (
     "/live — بازی‌هایی که همین حالا در جریان‌اند\n"
     "/match Celtic Dundee — جست‌وجوی یک بازی (نام انگلیسی)\n"
     "/id — شناسهٔ تلگرام تو\n\n"
-    "اعداد: احتمال میزبان · مساوی · مهمان (ترکیب مدل و قیمت بازار)\n"
-    "ساعت‌ها به وقت تهران است.\n"
+    "هر بازی دو خط دارد:\n"
+    "خط اول: ساعت به وقت تهران · دو تیم · ➜ شانس برد بیشتر\n"
+    "خط دوم: درصد سه حالت · ضریب · تعداد گل انتظاری\n\n"
+    "تیم اول میزبان است، تیم دوم مهمان.\n"
     "⚠ یعنی یکی از دو تیم سابقهٔ کافی ندارد."
 )
 
