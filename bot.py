@@ -68,9 +68,27 @@ def api(method: str, **params):
     return r.json()
 
 
+def split_message(text: str, limit: int = 3800) -> list[str]:
+    """Telegram caps messages at 4096 chars; split on line boundaries so HTML stays valid."""
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    current = ""
+    for line in text.split("\n"):
+        if current and len(current) + len(line) + 1 > limit:
+            chunks.append(current)
+            current = line
+        else:
+            current = f"{current}\n{line}" if current else line
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def send(chat_id: int, text: str) -> None:
-    api("sendMessage", chat_id=chat_id, text=text[:4000],
-        parse_mode="HTML", disable_web_page_preview=True)
+    for chunk in split_message(text or "—"):
+        api("sendMessage", chat_id=chat_id, text=chunk,
+            parse_mode="HTML", disable_web_page_preview=True)
 
 
 # ------------------------------------------------------------------ predictions
