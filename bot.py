@@ -55,7 +55,7 @@ def load_env() -> None:
 
 
 load_env()
-TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip().strip('"').strip("'")
 ALLOWED = {int(x) for x in re.split(r"[,\s]+", os.environ.get("ALLOWED_USER_IDS", "")) if x.strip().isdigit()}
 API = f"https://api.telegram.org/bot{TOKEN}"
 
@@ -315,6 +315,14 @@ def poll_forever() -> None:
 
 def listen(seconds: float | None) -> None:
     """Poll Telegram until `seconds` elapse (or forever when None)."""
+    me = api("getMe")
+    if not me.get("ok"):
+        raise SystemExit(
+            f"telegram rejected the token: {me.get('description')} "
+            "(run: python check_token.py)"
+        )
+    print(f"connected as @{me['result']['username']}", flush=True)
+
     offset = load_offset()
     deadline = None if seconds is None else time.time() + seconds
     print(f"listening ({'forever' if seconds is None else f'{seconds:.0f}s'})", flush=True)
