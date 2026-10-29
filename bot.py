@@ -33,6 +33,7 @@ import pandas as pd
 import requests
 
 import predict_fixtures as PF
+import fetch_data as FD
 from fetch_data import LEAGUES, load_matches
 from model import DixonColes
 
@@ -591,11 +592,15 @@ HELP = (
     "/value — بازی‌هایی که مدل با بازار اختلاف دارد (ارزش‌دار)\n"
     "/match Celtic Dundee — جست‌وجوی یک بازی (نام انگلیسی)\n"
     "/id — شناسهٔ تلگرام تو\n\n"
-    "هر بازی دو خط دارد:\n"
-    "خط اول: ساعت به وقت تهران · دو تیم · ➜ شانس برد بیشتر\n"
-    "خط دوم: درصد سه حالت · ضریب · تعداد گل انتظاری\n\n"
-    "تیم اول میزبان است، تیم دوم مهمان.\n"
-    "⚠ یعنی یکی از دو تیم سابقهٔ کافی ندارد."
+    "هر بازی یک کارت جدا دارد:\n"
+    "🕒 ساعت تهران · لیگ\n"
+    "🏠 میزبان — شانس بردش (و ضریبش)\n"
+    "✈️ مهمان — شانس بردش (و ضریبش)\n"
+    "📈 پنج بازی آخر: ✅ برد · ➖ مساوی · ❌ باخت\n"
+    "➜ محتمل‌ترین نتیجه · مساوی · گل انتظاری\n\n"
+    "تیم اول همیشه میزبان است، تیم دوم مهمان.\n"
+    "⚠ یعنی یکی از دو تیم سابقهٔ کافی ندارد.\n"
+    "🧮 یعنی ضریب این بازی نبود، پیش‌بینی فقط از مدل است."
 )
 
 
@@ -699,6 +704,26 @@ def poll_forever() -> None:
     listen(None)
 
 
+def refresh_data_if_stale(hours: int = 12) -> None:
+    """Keep results and odds fresh without depending on GitHub's broken cron.
+
+    GitHub's schedule trigger has not fired reliably since 2026, so a bot that
+    runs on a laptop has to pull its own data. Two seasons are enough: older
+    seasons never change.
+    """
+    raw = ROOT / "data" / "raw"
+    newest = max((p.stat().st_mtime for p in raw.glob("*.csv")), default=0.0)
+    if time.time() - newest < hours * 3600:
+        return
+    print("data is stale, refreshing ...", flush=True)
+    try:
+        FD.fetch_all(force=True, seasons=FD.SEASONS[-2:])
+        FD.download_fixtures(requests.Session(), force=True)
+        print("data refreshed", flush=True)
+    except Exception as exc:  # noqa: BLE001 - keep serving the cached data
+        print("data refresh failed:", exc, flush=True)
+
+
 def listen(seconds: float | None) -> None:
     """Poll Telegram until `seconds` elapse (or forever when None)."""
     me = api("getMe")
@@ -708,6 +733,8 @@ def listen(seconds: float | None) -> None:
             "(run: python check_token.py)"
         )
     print(f"connected as @{me['result']['username']}", flush=True)
+    if seconds is None:
+        refresh_data_if_stale()
 
     offset = load_offset()
     deadline = None if seconds is None else time.time() + seconds

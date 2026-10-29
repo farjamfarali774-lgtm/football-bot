@@ -21,3 +21,5 @@ summary.html
 # OS noise
 .DS_Store
 Thumbs.db
+# local cache of the /value track record
+.state/value_stats.json
