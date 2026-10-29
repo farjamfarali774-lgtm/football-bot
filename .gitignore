@@ -9,6 +9,7 @@ __pycache__/
 venv/
 
 # scratch outputs from local runs
+logs/
 backtest_all.txt
 backtest_out.txt
 backtest_pooled.txt

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import os
 import re
 import sys
@@ -320,12 +321,120 @@ def find_match(text: str) -> pd.DataFrame:
     return market_rows(fx[mask])
 
 
-# ----------------------------------------------------------------------- handler
+def recent_results(days: int = 7) -> pd.DataFrame:
+    """Walk-forward predictions for finished matches of the last `days` days.
+
+    The model is refitted per league per week on data that existed before that
+    week, so this is an honest out-of-sample scoreboard, not a replay.
+    """
+    df = load_matches(list(LEAGUES))
+    ref = pd.Timestamp.now(TEHRAN).normalize().tz_localize(None)
+    start = ref - pd.Timedelta(days=days)
+    ev = df[(df["date"] >= start) & (df["date"] < ref)].copy()
+    if ev.empty:
+        return pd.DataFrame()
+
+    ev["week"] = ev["date"].dt.to_period("W")
+    rows = []
+    for (league, _week), g in ev.groupby(["league", "week"]):
+        first = g["date"].min()
+        train = df[(df["league"] == league) & (df["date"] < first)
+                   & (df["date"] >= first - pd.Timedelta(days=900))]
+        if len(train) < 30:
+            continue
+        model = DixonColes().fit(train, first)
+        for _, m in g.iterrows():
+            p = model.predict(m["home"], m["away"])
+            oh, od, oa = m["mkt_h"], m["mkt_d"], m["mkt_a"]
+            if pd.isna(oh) or pd.isna(od) or pd.isna(oa) or min(oh, od, oa) <= 1.0:
+                mh = md = ma = float("nan")
+            else:
+                inv = 1.0 / oh + 1.0 / od + 1.0 / oa
+                mh, md, ma = (1.0 / oh) / inv, (1.0 / od) / inv, (1.0 / oa) / inv
+            rows.append({
+                "date": m["date"], "league": league,
+                "home": m["home"], "away": m["away"], "ftr": m["ftr"],
+                "hg": int(m["hg"]), "ag": int(m["ag"]),
+                "p_home": p["p_home"], "p_draw": p["p_draw"], "p_away": p["p_away"],
+                "mkt_h": mh, "mkt_d": md, "mkt_a": ma,
+            })
+    return pd.DataFrame(rows)
+
+
+LABEL = {"home": "برد میزبان", "draw": "مساوی", "away": "برد مهمان"}
+TRUTH = {"H": "home", "D": "draw", "A": "away"}
+ORDER = ("home", "draw", "away")
+
+
+def _pick(probs: tuple[float, float, float]) -> str:
+    return ORDER[max(range(3), key=lambda i: probs[i])]
+
+
+def format_results(days: int = 7) -> str:
+    pred = recent_results(days)
+    if pred.empty:
+        return f"📊 در {days} روز اخیر بازی تمام‌شده‌ای در لیگ‌های پوشش‌داده‌شده پیدا نشد."
+
+    hits = 0
+    ll_model = 0.0
+    ll_market = 0.0
+    market_n = 0
+    for _, r in pred.iterrows():
+        probs = (r["p_home"], r["p_draw"], r["p_away"])
+        truth = TRUTH[r["ftr"]]
+        picked = _pick(probs)
+        hits += int(picked == truth)
+        ll_model -= math.log(max(probs[ORDER.index(truth)], 1e-12))
+        mkt = (r["mkt_h"], r["mkt_d"], r["mkt_a"])
+        if not any(pd.isna(v) for v in mkt):
+            ll_market -= math.log(max(mkt[ORDER.index(truth)], 1e-12))
+            market_n += 1
+
+    n = len(pred)
+    acc = hits / n
+    ll_model /= n
+    ll_market = ll_market / market_n if market_n else float("nan")
+    market_text = "—" if pd.isna(ll_market) else f"{ll_market:.3f}"
+
+    parts = [
+        f"📊 <b>کارنامهٔ {days} روز اخیر</b>",
+        f"{n} بازی تمام‌شده بررسی شد",
+        f"✅ درست <b>{hits}</b> ({acc * 100:.0f}%) · ❌ غلط {n - hits}",
+        "🎲 شانس تصادفی بین سه حالت: ۳۳٪",
+        "",
+        "LogLoss (کمتر بهتر است):",
+        f"مدل <b>{ll_model:.3f}</b> · بازار {market_text}",
+    ]
+
+    last_day = pred["date"].max()
+    recent = pred[pred["date"] == last_day].tail(6)
+    if len(recent):
+        parts.append(f"\n<b>آخرین روز — {last_day.date()}</b>")
+        for _, r in recent.iterrows():
+            probs = (r["p_home"], r["p_draw"], r["p_away"])
+            truth = TRUTH[r["ftr"]]
+            picked = _pick(probs)
+            mark = "✅" if picked == truth else "❌"
+            home = html.escape(str(r["home"]))
+            away = html.escape(str(r["away"]))
+            parts.append(
+                "<blockquote>"
+                f"{mark} <b>{home}</b> {r['hg']}–{r['ag']} <b>{away}</b>\n"
+                f"مدل گفت: {LABEL[picked]} {pc(probs[ORDER.index(picked)])}\n"
+                f"واقعیت: {LABEL[truth]}"
+                "</blockquote>"
+            )
+    return "\n".join(parts)
+    return "\n".join(parts)
+
+
 HELP = (
     "<b>ربات پیش‌بینی فوتبال</b>\n\n"
     "/today — بازی‌های امروز\n"
     "/tomorrow — بازی‌های فردا\n"
     "/live — بازی‌هایی که همین حالا در جریان‌اند\n"
+    "/results — کارنامه: پیش‌بینی‌های اخیر درست بود یا نه\n"
+    "/results 30 — کارنامهٔ ۳۰ روز اخیر\n"
     "/match Celtic Dundee — جست‌وجوی یک بازی (نام انگلیسی)\n"
     "/id — شناسهٔ تلگرام تو\n\n"
     "هر بازی دو خط دارد:\n"
@@ -362,6 +471,11 @@ def handle(update: dict) -> None:
             f"\n<code>{uid}</code>"
         )
         send(chat_id, HELP + note)
+        if command == "/start":
+            try:
+                send(chat_id, format_day(today_rows(), "⚽️ بازی‌های امروز"))
+            except Exception as exc:  # noqa: BLE001
+                send(chat_id, f"خطا در گرفتن بازی‌های امروز: <code>{html.escape(str(exc)[:200])}</code>")
         return
 
     try:
@@ -373,6 +487,10 @@ def handle(update: dict) -> None:
             rows = live_rows()
             send(chat_id, format_day(rows, "🔴 همین حالا در جریان") if not rows.empty
                  else "🔴 الان بازی‌ای در جریان نیست (لیگ‌های پوشش‌داده‌شده).")
+        elif command in ("/results", "/stats"):
+            bits = text.split()
+            days = int(bits[1]) if len(bits) > 1 and bits[1].isdigit() else 7
+            send(chat_id, format_results(days))
         elif command == "/match":
             query = text[len("/match"):].strip()
             if not query:

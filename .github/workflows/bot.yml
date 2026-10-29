@@ -1,19 +1,18 @@
 name: telegram-bot
 
-# Answers /today, /tomorrow, /live, /match.
+# Backup runner only - NOT the primary way the bot stays online.
 #
-# Cadence: a scheduled run wakes up, listens for ~4.5 minutes, then exits.
-# With "*/5" the bot is covered almost continuously.
+# GitHub's schedule trigger has been unreliable for months (many 2026 reports of
+# cron never firing at all), and a scheduled run also has to install pandas and
+# numpy before it can answer, so replies arrive a minute or two late.
 #
-# Cost: GitHub gives 2,000 free minutes/month to PRIVATE repos; this schedule
-# uses roughly 1,200 minutes/DAY. So either make this repo public (Actions are
-# then unlimited and the code contains no secrets), or slow it down:
-#     */15 cron + "python bot.py --listen 280"  -> answers within ~15 min
-#     */30 cron + "python bot.py --listen 280"  -> answers within ~30 min
+# The bot normally runs on the owner's machine: run_bot.bat, started at login by
+# the "FootballBot" scheduled task. This workflow stays for manual runs:
+#     gh workflow run telegram-bot
+# It listens for ~4.5 minutes and exits, so trigger it only when the local
+# runner is off, otherwise both processes fight over getUpdates.
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
