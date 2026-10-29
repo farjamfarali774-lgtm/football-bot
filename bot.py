@@ -40,6 +40,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / ".state" / "offset.json"
+VALUE_STATS = ROOT / ".state" / "value_stats.json"
 TEHRAN = ZoneInfo("Asia/Tehran")
 
 
@@ -150,9 +151,7 @@ def market_rows(fx: pd.DataFrame) -> pd.DataFrame:
             row = PF.build_row(r.to_dict(), model.predict(r["home"], r["away"]))
             n_min = min(int(counts.get(r["home"], 0)), int(counts.get(r["away"], 0)))
             w = min(1.0, n_min / 30.0)
-            row["final_home"] = w * row["p_home"] + (1 - w) * row["mkt_home"]
-            row["final_draw"] = w * row["p_draw"] + (1 - w) * row["mkt_draw"]
-            row["final_away"] = w * row["p_away"] + (1 - w) * row["mkt_away"]
+            row = PF.blend(row, w)
             row["low_data"] = n_min < 15
             row["time"] = r.get("time", "")
             row["form_home"] = forms.get(r["home"], "—")
@@ -193,12 +192,16 @@ LEAGUE_FLAG = {
 }
 
 
+def odd(r, key: str) -> str:
+    value = r.get(key)
+    return "—" if value is None or pd.isna(value) else f"{value:.2f}"
+
+
 def odds_text(r) -> str:
-    parts = []
-    for key in ("odds_h", "odds_d", "odds_a"):
-        value = r.get(key)
-        parts.append("—" if pd.isna(value) else f"{value:.2f}")
-    return "/".join(parts)
+    values = [r.get(k) for k in ("odds_h", "odds_d", "odds_a")]
+    if all(v is None or pd.isna(v) for v in values):
+        return "بدون ضریب (فقط مدل)"
+    return "/".join("—" if v is None or pd.isna(v) else f"{v:.2f}" for v in values)
 
 
 def pick_text(r) -> str:
@@ -235,17 +238,158 @@ def format_day(rows: pd.DataFrame, title: str) -> str:
         warn = " ⚠" if r.get("low_data") else ""
         goals = r.get("exp_goals")
         goals_text = "—" if goals is None or pd.isna(goals) else f"{goals:.1f}"
+        no_odds = bool(r.get("no_odds"))
+        home_line = f"🏠 <b>{home}</b> — برد {pc(r['final_home'])}"
+        away_line = f"✈️ <b>{away}</b> — برد {pc(r['final_away'])}"
+        if not no_odds:
+            home_line += f" · ضریب {odd(r, 'odds_h')}"
+            away_line += f" · ضریب {odd(r, 'odds_a')}"
         parts.append(
             "<blockquote>"
             f"🕒 <b>{r['time'] or '--:--'}</b> · {flag} {league}{warn}\n"
-            f"🏠 <b>{home}</b> — برد {pc(r['final_home'])} · ضریب {odd(r, 'odds_h')}\n"
-            f"✈️ <b>{away}</b> — برد {pc(r['final_away'])} · ضریب {odd(r, 'odds_a')}\n"
+            f"{home_line}\n"
+            f"{away_line}\n"
             f"📈 فرم {home}: {r.get('form_home', '—')} · {away}: {r.get('form_away', '—')}\n"
             f"➜ <b>{html.escape(pick_text(r))}</b> · مساوی {pc(r['final_draw'])} · ⚽ {goals_text}"
+            f"{'' if not no_odds else chr(10) + '🧮 ضریب این بازی نیست، پیش‌بینی فقط از مدل است'}"
             "</blockquote>"
         )
-    parts.append("\n⚠ = سابقهٔ کم (کمتر از ۱۵ بازی)، خروجی به سمت قیمت بازار متمایل شده")
+    parts.append("\n⚠ = سابقهٔ کم (کمتر از ۱۵ بازی) · 🧮 = بدون ضریب بازار، فقط مدل")
     return "\n".join(parts)
+
+
+def upcoming_rows(days: int = 2) -> pd.DataFrame:
+    """Every covered fixture from now to `days` from today (Tehran)."""
+    fx = PF.load_fixtures(list(LEAGUES), force=True)
+    today = pd.Timestamp.now(TEHRAN).normalize().tz_localize(None)
+    return market_rows(fx[(fx["date"] >= today) & (fx["date"] < today + pd.Timedelta(days=days))])
+
+
+def value_picks(rows: pd.DataFrame, min_edge: float = 0.05) -> pd.DataFrame:
+    """Fixtures where our blended probability beats the market's by `min_edge`.
+
+    The market probability is the normalised closing price, so the margin is
+    removed and the two numbers are comparable.
+    """
+    if rows.empty:
+        return pd.DataFrame()
+    picks = []
+    for _, r in rows.iterrows():
+        best = None
+        for key, prob, mkt, odd, name in (
+            ("home", r["final_home"], r["mkt_home"], r["odds_h"], r["home"]),
+            ("draw", r["final_draw"], r["mkt_draw"], r["odds_d"], "مساوی"),
+            ("away", r["final_away"], r["mkt_away"], r["odds_a"], r["away"]),
+        ):
+            if pd.isna(prob) or pd.isna(mkt) or pd.isna(odd) or odd <= 1.0:
+                continue
+            edge = float(prob) - float(mkt)
+            if edge < min_edge or prob < 0.25:
+                continue
+            if best is None or edge > best[1]:
+                best = (key, edge, float(prob), float(mkt), float(odd), name)
+        if best is not None:
+            row = r.to_dict()
+            (row["v_side"], row["v_edge"], row["v_prob"],
+             row["v_mkt"], row["v_odd"], row["v_name"]) = best
+            picks.append(row)
+    if not picks:
+        return pd.DataFrame()
+    return pd.DataFrame(picks).sort_values("v_edge", ascending=False).reset_index(drop=True)
+
+
+def format_value(rows: pd.DataFrame, total: int, min_edge: float, priced: int) -> str:
+    head = f"💎 <b>ارزش‌دارها</b> — اختلاف مدل با بازار ≥ {min_edge * 100:.0f}٪"
+    if rows.empty:
+        return (f"{head}\n\nدر {priced} بازی ضریب‌دار (از {total} بازی ۳ روز آینده) "
+                "جایی پیدا نشد که مدل با بازار این‌قدر اختلاف داشته باشد.")
+    parts = [
+        head,
+        f"{len(rows)} مورد از {priced} بازی ضریب‌دار",
+        f"{total} بازی در ۳ روز آینده بررسی شد؛ بقیه هنوز ضریب ندارند.",
+        "یعنی مدل می‌گوید بازار این نتیجه را کم‌قیمت گرفته.",
+        "",
+    ]
+    for _, r in rows.iterrows():
+        flag = LEAGUE_FLAG.get(str(r["league"]), "⚽️")
+        warn = " ⚠" if r.get("low_data") else ""
+        parts.append(
+            "<blockquote>"
+            f"🕒 <b>{r['time'] or '--:--'}</b> · {flag} {html.escape(str(r['league']))}{warn}\n"
+            f"🏠 {html.escape(str(r['home']))} – ✈️ {html.escape(str(r['away']))}\n"
+            f"💎 ارزش روی <b>{html.escape(str(r['v_name']))}</b>\n"
+            f"مدل {pc(r['v_prob'])} · بازار {pc(r['v_mkt'])} · "
+            f"اختلاف +{r['v_edge'] * 100:.0f}٪ · ضریب {r['v_odd']:.2f}"
+            "</blockquote>"
+        )
+    parts.append("\n⚠ = سابقهٔ کم · این فقط اختلاف با بازار است، نه تضمین سود.")
+    record = value_track_record(min_edge)
+    if record:
+        parts.append(record)
+    return "\n".join(parts)
+
+
+def value_stats(days: int = 90, max_age_hours: int = 12) -> dict:
+    """Measured record of the /value filter, so the command shows its own result.
+
+    Betting every disagreement with the market is the intuitive idea and the
+    wrong one: in 90 days of walk-forward data it returned about -13%, i.e. the
+    model's "edges" are its mistakes rather than the market's.
+    """
+    try:
+        cached = json.loads(VALUE_STATS.read_text(encoding="utf-8"))
+        age = (pd.Timestamp.now() - pd.Timestamp(cached["at"])).total_seconds() / 3600.0
+        if cached.get("days") == days and age < max_age_hours:
+            return cached
+    except Exception:  # noqa: BLE001 - a stale cache is not an error
+        pass
+
+    pred = recent_results(days)
+    truth = {"H": "home", "D": "draw", "A": "away"}
+    sides = []
+    for _, r in pred.iterrows():
+        actual = truth[r["ftr"]]
+        for side, prob, mkt, odd in (
+            ("home", r["f_home"], r["mkt_h"], r["odd_h"]),
+            ("draw", r["f_draw"], r["mkt_d"], r["odd_d"]),
+            ("away", r["f_away"], r["mkt_a"], r["odd_a"]),
+        ):
+            if pd.isna(prob) or pd.isna(mkt) or pd.isna(odd):
+                continue
+            sides.append((float(prob), float(mkt), float(odd), int(side == actual)))
+
+    stats: dict = {"at": pd.Timestamp.now().isoformat(), "days": days,
+                   "matches": int(len(pred)), "edges": {}}
+    for edge in (0.03, 0.05, 0.08, 0.10):
+        bets = [s for s in sides if s[0] - s[1] >= edge and s[0] >= 0.25]
+        if not bets:
+            stats["edges"][f"{edge:.2f}"] = {"bets": 0, "hit": None, "roi": None}
+            continue
+        stats["edges"][f"{edge:.2f}"] = {
+            "bets": len(bets),
+            "hit": sum(s[3] for s in bets) / len(bets),
+            "roi": sum(s[3] * s[2] - 1.0 for s in bets) / len(bets),
+        }
+    try:
+        VALUE_STATS.parent.mkdir(parents=True, exist_ok=True)
+        VALUE_STATS.write_text(json.dumps(stats), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+    return stats
+
+
+def value_track_record(min_edge: float, days: int = 90) -> str:
+    try:
+        stats = value_stats(days)
+    except Exception:  # noqa: BLE001
+        return ""
+    edges = stats.get("edges") or {}
+    entry = edges.get(f"{min_edge:.2f}") or edges.get("0.05")
+    if not entry or not entry.get("bets"):
+        return ""
+    verdict = "ضرر می‌داد" if entry["roi"] < 0 else "سود می‌داد"
+    return (f"\n📉 سابقهٔ همین فیلتر در {days} روز اخیر: {entry['bets']} سیگنال · "
+            f"برد {entry['hit'] * 100:.0f}٪ · بازده {entry['roi'] * 100:+.0f}٪ ({verdict})")
 
 
 def today_rows() -> pd.DataFrame:
@@ -343,20 +487,29 @@ def recent_results(days: int = 7) -> pd.DataFrame:
         if len(train) < 30:
             continue
         model = DixonColes().fit(train, first)
+        counts = pd.concat([train["home"], train["away"]]).value_counts()
         for _, m in g.iterrows():
             p = model.predict(m["home"], m["away"])
             oh, od, oa = m["mkt_h"], m["mkt_d"], m["mkt_a"]
             if pd.isna(oh) or pd.isna(od) or pd.isna(oa) or min(oh, od, oa) <= 1.0:
                 mh = md = ma = float("nan")
+                fh, fd, fa = p["p_home"], p["p_draw"], p["p_away"]
             else:
                 inv = 1.0 / oh + 1.0 / od + 1.0 / oa
                 mh, md, ma = (1.0 / oh) / inv, (1.0 / od) / inv, (1.0 / oa) / inv
+                n_min = min(int(counts.get(m["home"], 0)), int(counts.get(m["away"], 0)))
+                w = min(1.0, n_min / 30.0)
+                fh = w * p["p_home"] + (1 - w) * mh
+                fd = w * p["p_draw"] + (1 - w) * md
+                fa = w * p["p_away"] + (1 - w) * ma
             rows.append({
                 "date": m["date"], "league": league,
                 "home": m["home"], "away": m["away"], "ftr": m["ftr"],
                 "hg": int(m["hg"]), "ag": int(m["ag"]),
                 "p_home": p["p_home"], "p_draw": p["p_draw"], "p_away": p["p_away"],
                 "mkt_h": mh, "mkt_d": md, "mkt_a": ma,
+                "odd_h": oh, "odd_d": od, "odd_a": oa,
+                "f_home": fh, "f_draw": fd, "f_away": fa,
             })
     return pd.DataFrame(rows)
 
@@ -435,6 +588,7 @@ HELP = (
     "/live — بازی‌هایی که همین حالا در جریان‌اند\n"
     "/results — کارنامه: پیش‌بینی‌های اخیر درست بود یا نه\n"
     "/results 30 — کارنامهٔ ۳۰ روز اخیر\n"
+    "/value — بازی‌هایی که مدل با بازار اختلاف دارد (ارزش‌دار)\n"
     "/match Celtic Dundee — جست‌وجوی یک بازی (نام انگلیسی)\n"
     "/id — شناسهٔ تلگرام تو\n\n"
     "هر بازی دو خط دارد:\n"
@@ -491,6 +645,17 @@ def handle(update: dict) -> None:
             bits = text.split()
             days = int(bits[1]) if len(bits) > 1 and bits[1].isdigit() else 7
             send(chat_id, format_results(days))
+        elif command == "/value":
+            bits = text.split()
+            edge = 0.05
+            if len(bits) > 1:
+                try:
+                    edge = max(0.02, min(0.30, float(bits[1].replace("%", "")) / 100.0))
+                except ValueError:
+                    pass
+            rows = upcoming_rows(3)
+            priced = int(rows["mkt_home"].notna().sum()) if not rows.empty else 0
+            send(chat_id, format_value(value_picks(rows, edge), len(rows), edge, priced))
         elif command == "/match":
             query = text[len("/match"):].strip()
             if not query:

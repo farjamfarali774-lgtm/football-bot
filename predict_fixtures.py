@@ -32,6 +32,7 @@ import requests
 
 sys.stdout.reconfigure(encoding="utf-8")
 
+import fixtures_extra
 from fetch_data import LEAGUES, download_fixtures, load_matches
 from model import DixonColes
 
@@ -62,7 +63,49 @@ def kickoff_tehran(day, time_text: str) -> tuple[pd.Timestamp, str]:
     return in_tehran.tz_localize(None).normalize(), in_tehran.strftime("%H:%M")
 
 
-def load_fixtures(leagues: list[str], force: bool = True) -> pd.DataFrame:
+_TEAMS: dict = {"stamp": None, "by_div": {}}
+
+
+def known_teams(divs: list[str]) -> dict[str, set[str]]:
+    """Team names exactly as the training CSVs spell them, cached for 6 hours."""
+    now = pd.Timestamp.now()
+    if _TEAMS["stamp"] is None or now - _TEAMS["stamp"] > pd.Timedelta(hours=6):
+        _TEAMS["by_div"] = {}
+        _TEAMS["stamp"] = now
+    for div in divs:
+        if div in _TEAMS["by_div"]:
+            continue
+        try:
+            data = load_matches([div])
+            _TEAMS["by_div"][div] = set(data["home"]) | set(data["away"])
+        except Exception:  # noqa: BLE001
+            _TEAMS["by_div"][div] = set()
+    return {div: _TEAMS["by_div"][div] for div in divs}
+
+
+def merge_extra(out: pd.DataFrame, leagues: list[str]) -> pd.DataFrame:
+    """Add upcoming matches the football-data CSV does not list yet."""
+    wanted = {div: LEAGUES[div] for div in leagues if div in LEAGUES}
+    if not wanted:
+        return out
+    try:
+        more = fixtures_extra.fetch(wanted, known_teams(list(wanted)))
+    except Exception:  # noqa: BLE001 - the second source is optional
+        return out
+    if more.empty:
+        return out
+
+    today = pd.Timestamp.now(TEHRAN).normalize().tz_localize(None)
+    more = more[more["date"] >= today]
+    if not out.empty:
+        have = set(zip(out["home"], out["away"]))
+        more = more[[(h, a) not in have for h, a in zip(more["home"], more["away"])]]
+    if more.empty:
+        return out
+    return pd.concat([out, more], ignore_index=True)
+
+
+def load_fixtures(leagues: list[str], force: bool = True, extra: bool = True) -> pd.DataFrame:
     path = download_fixtures(requests.Session(), force=force)
     fx = pd.read_csv(path, encoding="utf-8-sig")
     fx["date"] = pd.to_datetime(fx["Date"], dayfirst=True, errors="coerce")
@@ -88,16 +131,35 @@ def load_fixtures(leagues: list[str], force: bool = True) -> pd.DataFrame:
         })
     out = pd.DataFrame(rows, columns=["league", "div", "date", "time",
                                       "home", "away", "odds_h", "odds_d", "odds_a"])
+    if extra:
+        out = merge_extra(out, leagues)
     return out.sort_values("date").reset_index(drop=True)
 
 
 def market_probs(odds: tuple[float, float, float]) -> tuple[float, float, float]:
     vals = [o for o in odds if o is not None and not pd.isna(o) and o > 1.0]
     if len(vals) != 3:
-        return (0.5, 0.3, 0.2)
+        # No usable price: caller must fall back to the model alone. Returning a
+        # made-up 50/30/20 split here would quietly poison the blend.
+        return (float("nan"), float("nan"), float("nan"))
     inv = np.array([1.0 / o for o in vals])
     inv = inv / inv.sum()
     return float(inv[0]), float(inv[1]), float(inv[2])
+
+
+def blend(row: dict, w: float) -> dict:
+    """Model/market blend that degrades to the pure model when there are no odds."""
+    if pd.isna(row.get("mkt_home")):
+        row["final_home"] = row["p_home"]
+        row["final_draw"] = row["p_draw"]
+        row["final_away"] = row["p_away"]
+        row["no_odds"] = True
+    else:
+        row["final_home"] = w * row["p_home"] + (1 - w) * row["mkt_home"]
+        row["final_draw"] = w * row["p_draw"] + (1 - w) * row["mkt_draw"]
+        row["final_away"] = w * row["p_away"] + (1 - w) * row["mkt_away"]
+        row["no_odds"] = False
+    return row
 
 
 def build_row(r: dict, p: dict) -> dict:
@@ -152,9 +214,7 @@ def run(rows: list[dict]) -> pd.DataFrame:
         n_min = min(row["n_home"], row["n_away"])
         w = min(1.0, n_min / 30.0)
         row["model_weight"] = w
-        row["final_home"] = w * row["p_home"] + (1 - w) * row["mkt_home"]
-        row["final_draw"] = w * row["p_draw"] + (1 - w) * row["mkt_draw"]
-        row["final_away"] = w * row["p_away"] + (1 - w) * row["mkt_away"]
+        row = blend(row, w)
         row["low_data"] = n_min < 15
         out.append(row)
     return pd.DataFrame(out).sort_values("date").reset_index(drop=True)
